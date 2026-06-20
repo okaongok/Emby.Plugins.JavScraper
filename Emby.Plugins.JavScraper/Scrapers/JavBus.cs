@@ -53,9 +53,10 @@ namespace Emby.Plugins.JavScraper.Scrapers
         /// <returns></returns>
         protected override async Task<List<JavVideoIndex>> DoQyery(List<JavVideoIndex> ls, string key)
         {
-            //https://www.javbus.cloud/search/33&type=1
-            //https://www.javbus.cloud/uncensored/search/33&type=0&parent=uc
-            var doc = await GetHtmlDocumentAsync($"/search/{key}&type=1");
+            //https://www.javbus.com/search/ABP-933?type=1
+            //https://www.javbus.com/uncensored/search/ABP-933?type=1
+            log?.Info($"{Name}: searching {key}");
+            var doc = await GetHtmlDocumentAsync($"/search/{key}?type=1");
             if (doc != null)
             {
                 ParseIndex(ls, doc);
@@ -71,10 +72,11 @@ namespace Emby.Plugins.JavScraper.Scrapers
                         return ls;
                 }
             }
-            doc = await GetHtmlDocumentAsync($"/uncensored/search/{key}&type=1");
+            doc = await GetHtmlDocumentAsync($"/uncensored/search/{key}?type=1");
             ParseIndex(ls, doc);
 
             SortIndex(key, ls);
+            log?.Info($"{Name}: found {ls.Count} results for {key}");
             return ls;
         }
 
@@ -127,57 +129,79 @@ namespace Emby.Plugins.JavScraper.Scrapers
         /// <returns></returns>
         public override async Task<JavVideo> Get(string url)
         {
-            //https://www.javbus.cloud/ABP-933
+            //https://www.javbus.com/ABP-933
+            log?.Info($"{Name}: fetching {url}");
             var doc = await GetHtmlDocumentAsync(url);
             if (doc == null)
+            {
+                log?.Warn($"{Name}: empty response for {url}");
                 return null;
+            }
 
             var node = doc.DocumentNode.SelectSingleNode("//div[@class='container']/h3/..");
             if (node == null)
+            {
+                log?.Warn($"{Name}: detail container not found for {url}");
                 return null;
+            }
 
             var dic = new Dictionary<string, string>();
             var nodes = node.SelectNodes(".//span[@class='header']");
-            foreach (var n in nodes)
+            if (nodes?.Any() == true)
             {
-                var next = n.NextSibling;
-                while (next != null && string.IsNullOrWhiteSpace(next.InnerText))
-                    next = next.NextSibling;
-                if (next != null)
-                    dic[n.InnerText.Trim()] = next.InnerText.Trim();
+                foreach (var n in nodes)
+                {
+                    var next = n.NextSibling;
+                    while (next != null && string.IsNullOrWhiteSpace(next.InnerText))
+                        next = next.NextSibling;
+                    if (next != null)
+                        dic[n.InnerText.Trim()] = next.InnerText.Trim();
+                }
             }
 
             string GetValue(string _key)
                 => dic.Where(o => o.Key.Contains(_key)).Select(o => o.Value).FirstOrDefault();
 
             var genres = node.SelectNodes(".//span[@class='genre']")?
-                 .Select(o => o.InnerText.Trim()).ToList();
+                 .Select(o => o.InnerText.Trim()).Where(o => !string.IsNullOrWhiteSpace(o)).ToList();
 
             var actors = node.SelectNodes(".//div[@class='star-name']")?
-                 .Select(o => o.InnerText.Trim()).ToList();
+                 .Select(o => o.InnerText.Trim()).Where(o => !string.IsNullOrWhiteSpace(o)).ToList();
 
             var samples = node.SelectNodes(".//a[@class='sample-box']")?
-                 .Select(o => o.GetAttributeValue("href", null)).Where(o => o != null).ToList();
+                 .Select(o => o.GetAttributeValue("href", null)).Where(o => !string.IsNullOrWhiteSpace(o)).ToList();
+
+            var title = node.SelectSingleNode("./h3")?.InnerText?.Trim();
+            var num = GetValue("識別碼");
+            log?.Info($"{Name}: parsed title='{title}', num='{num}'");
+
             var m = new JavVideo()
             {
                 Provider = Name,
                 Url = url,
-                Title = node.SelectSingleNode("./h3")?.InnerText?.Trim(),
+                Title = title,
                 Cover = node.SelectSingleNode(".//a[@class='bigImage']")?.GetAttributeValue("href", null),
-                Num = GetValue("識別碼"),
+                Num = num,
                 Date = GetValue("發行日期"),
                 Runtime = GetValue("長度"),
                 Maker = GetValue("發行商"),
                 Studio = GetValue("製作商"),
                 Set = GetValue("系列"),
                 Director = GetValue("導演"),
-                //Plot = node.SelectSingleNode("./h3")?.InnerText,
                 Genres = genres,
                 Actors = actors,
                 Samples = samples,
             };
 
-            m.Plot = await GetDmmPlot(m.Num);
+            try
+            {
+                m.Plot = await GetDmmPlot(m.Num);
+            }
+            catch (Exception ex)
+            {
+                log?.Warn($"{Name}: failed to get DMM plot for {m.Num}: {ex.Message}");
+            }
+
             //去除标题中的番号
             if (string.IsNullOrWhiteSpace(m.Num) == false && m.Title?.StartsWith(m.Num, StringComparison.OrdinalIgnoreCase) == true)
                 m.Title = m.Title.Substring(m.Num.Length).Trim();

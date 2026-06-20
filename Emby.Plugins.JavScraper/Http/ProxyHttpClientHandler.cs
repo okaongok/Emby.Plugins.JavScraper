@@ -46,7 +46,18 @@ namespace Emby.Plugins.JavScraper.Http
 
             // Add UserAgent
             if (!(request.Headers.UserAgent?.Count() > 0))
-                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36");
+                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+
+            // Add common browser headers for HTML requests to avoid being blocked by WAF/Cloudflare
+            if (request.Method == HttpMethod.Get && request.Headers.Accept?.Count == 0)
+            {
+                request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+                request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7");
+                request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+                request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+                request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+                request.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+            }
 
             if (cfg.EnableJsProxy == false)
             {
